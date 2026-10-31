@@ -1,0 +1,875 @@
+#!/usr/bin/env python3
+"""
+Generates the complete Synthetic SAP & Operational Dataset for Use Case A:
+Organisation-Wide Continuous Control Monitoring (Phase 2).
+Includes:
+1. Procure-to-Pay (SAP EKKO/EKPO Purchase Orders, RBKP/RSEG Vendor Invoices, ME13 Contract Prices)
+2. Payroll, HR & Labour Law (SAP PA0000/PAYR Payroll, ZKTeco Biometric Attendance, 15 Service Providers)
+3. IT User Access & SoD (SAP USR02/AGR_USERS & SM20 Execution Logs)
+4. Supporting Unstructured Evidence Extracts (OCR Invoices, Approval Emails, Exit Forms, Wage Sheets)
+5. 200-Item Gold Set of Previously Closed Audit Items for Senior Auditor Rating Agreement & False-Clear Eval
+All identity, bank, and tax numbers include both raw (synthetic) and masked versions to prove PII masking.
+"""
+import json
+import random
+import os
+
+random.seed(722)
+os.makedirs("data", exist_ok=True)
+
+def mask_cnic(cnic: str) -> str:
+    # e.g., 42101-7654321-3 -> 42101-*******-3
+    parts = cnic.split("-")
+    if len(parts) == 3:
+        return f"{parts[0]}-*******-{parts[2]}"
+    return "*****-*******-*"
+
+def mask_iban(iban: str) -> str:
+    # e.g., PK36SCBL0000001122334455 -> PK36SCBL************4455
+    if len(iban) >= 12:
+        return iban[:8] + "*" * (len(iban) - 12) + iban[-4:]
+    return "PK**************"
+
+def mask_ntn(ntn: str) -> str:
+    # e.g., NTN-4458921-7 -> NTN-*****21-7
+    if len(ntn) >= 6:
+        return ntn[:4] + "*****" + ntn[-4:]
+    return "NTN-*******"
+
+# 15 Service Providers across the 3 factories & Head Office
+service_providers = [
+    {"sp_id": "SP-001", "name": "Indus Workforce Solutions Pvt Ltd", "category": "Contract Labour (Packing & Loading)", "site_id": "PLANT-KHI-01", "province": "Sindh", "workers_count": 145, "ntn_raw": "NTN-3109482-1", "iban_raw": "PK24HABB0004521987654301"},
+    {"sp_id": "SP-002", "name": "Mehran Industrial Security Services", "category": "Plant Security Guards", "site_id": "PLANT-KHI-01", "province": "Sindh", "workers_count": 68, "ntn_raw": "NTN-3298114-5", "iban_raw": "PK88MEZN0001129876541102"},
+    {"sp_id": "SP-003", "name": "Karachi Catering & Canteen Contractors", "category": "Factory Canteen & Hygiene", "site_id": "PLANT-KHI-01", "province": "Sindh", "workers_count": 42, "ntn_raw": "NTN-3387109-2", "iban_raw": "PK19UBLX0009988776652203"},
+    {"sp_id": "SP-004", "name": "Port Qasim Bulk Fleet & Transport Co", "category": "Finished Goods & Raw Material Transport", "site_id": "PLANT-KHI-01", "province": "Sindh", "workers_count": 90, "ntn_raw": "NTN-3451092-8", "iban_raw": "PK61MCIB0004455667783304"},
+    {"sp_id": "SP-005", "name": "Sindh Janitorial & Sanitation Associates", "category": "Sanitation & Line Cleaning", "site_id": "PLANT-KHI-01", "province": "Sindh", "workers_count": 135, "ntn_raw": "NTN-3590182-4", "iban_raw": "PK45BAHL0002233445564405"},
+    {"sp_id": "SP-006", "name": "Hattar Peak Labour Supply Agency", "category": "Contract Labour (Cake & Wafer Lines)", "site_id": "PLANT-KPK-02", "province": "Khyber Pakhtunkhwa", "workers_count": 130, "ntn_raw": "NTN-2109481-6", "iban_raw": "PK12KHYB0007766554435506"},
+    {"sp_id": "SP-007", "name": "Khyber Shield Security Pvt Ltd", "category": "Plant Security Guards", "site_id": "PLANT-KPK-02", "province": "Khyber Pakhtunkhwa", "workers_count": 55, "ntn_raw": "NTN-2298412-3", "iban_raw": "PK91HABB0008877665546607"},
+    {"sp_id": "SP-008", "name": "Haripur Industrial Meals & Canteen", "category": "Factory Canteen & Mess", "site_id": "PLANT-KPK-02", "province": "Khyber Pakhtunkhwa", "workers_count": 35, "ntn_raw": "NTN-2381920-9", "iban_raw": "PK33MEZN0006655443327708"},
+    {"sp_id": "SP-009", "name": "Northern Corridor Logistics & Haulage", "category": "Transport & Cold-Chain Distribution", "site_id": "PLANT-KPK-02", "province": "Khyber Pakhtunkhwa", "workers_count": 75, "ntn_raw": "NTN-2490123-7", "iban_raw": "PK77ALFH0005544332218809"},
+    {"sp_id": "SP-010", "name": "Hazara Facility Maintenance & Support", "category": "Boiler & Packaging Helper Labour", "site_id": "PLANT-KPK-02", "province": "Khyber Pakhtunkhwa", "workers_count": 55, "ntn_raw": "NTN-2510984-2", "iban_raw": "PK54ASKC0003322110099910"},
+    {"sp_id": "SP-011", "name": "Ravi Industrial Manpower Services", "category": "Contract Labour (Cupcake & Cookie Lines)", "site_id": "PLANT-LHE-03", "province": "Punjab", "workers_count": 160, "ntn_raw": "NTN-4109283-5", "iban_raw": "PK18BOPU0001199887761011"},
+    {"sp_id": "SP-012", "name": "Five Rivers Force Security Services", "category": "Plant Security Guards", "site_id": "PLANT-LHE-03", "province": "Punjab", "workers_count": 65, "ntn_raw": "NTN-4209184-1", "iban_raw": "PK66HABB0002288776652012"},
+    {"sp_id": "SP-013", "name": "Lahore Tiffin & Factory Catering", "category": "Factory Canteen & Hospitality", "site_id": "PLANT-LHE-03", "province": "Punjab", "workers_count": 45, "ntn_raw": "NTN-4319827-8", "iban_raw": "PK29MCIB0003377665543013"},
+    {"sp_id": "SP-014", "name": "GT Road Freight & Distribution Movers", "category": "Primary Logistics & Transport", "site_id": "PLANT-LHE-03", "province": "Punjab", "workers_count": 95, "ntn_raw": "NTN-4498120-3", "iban_raw": "PK82UBLX0004466554434014"},
+    {"sp_id": "SP-015", "name": "Sundar Estate Technical & Housekeeping Co", "category": "Sanitation & Warehouse Loaders", "site_id": "PLANT-LHE-03", "province": "Punjab", "workers_count": 130, "ntn_raw": "NTN-4587129-6", "iban_raw": "PK40MEZN0005566778895015"}
+]
+
+for sp in service_providers:
+    sp["ntn_masked"] = mask_ntn(sp["ntn_raw"])
+    sp["iban_masked"] = mask_iban(sp["iban_raw"])
+
+# Approved Raw Material & Packaging Vendors
+vendors = [
+    {"vendor_id": "V-1001", "name": "Sindh Fine Roller Flour Mills Ltd", "commodity": "Fine Biscuit Flour (Maida)", "contract_unit_price_pkr": 118.0, "uom": "KG", "site_id": "PLANT-KHI-01", "ntn_raw": "NTN-1120984-3", "iban_raw": "PK36SCBL0000001122339821"},
+    {"vendor_id": "V-1002", "name": "Mehran Refined Sugar & Allied Mills", "commodity": "Refined ICUMSA-45 Sugar", "contract_unit_price_pkr": 142.0, "uom": "KG", "site_id": "PLANT-KHI-01", "ntn_raw": "NTN-1198231-7", "iban_raw": "PK44HABB0000009988771234"},
+    {"vendor_id": "V-1003", "name": "Port Qasim Edible Oils & Palm Refinery", "commodity": "RBD Palm Olein & Shortening", "contract_unit_price_pkr": 395.0, "uom": "KG", "site_id": "PLANT-KHI-01", "ntn_raw": "NTN-1287341-9", "iban_raw": "PK71MEZN0000004455667890"},
+    {"vendor_id": "V-1004", "name": "Pak Flexo BOPP Packaging Films Ltd", "commodity": "Printed Food-Grade BOPP Film", "contract_unit_price_pkr": 680.0, "uom": "KG", "site_id": "PLANT-LHE-03", "ntn_raw": "NTN-4458921-8", "iban_raw": "PK19MCIB0000007766554321"},
+    {"vendor_id": "V-1005", "name": "Hattar Corrugated Cartons & Board", "commodity": "5-Ply Master Shipping Cartons", "contract_unit_price_pkr": 85.0, "uom": "PC", "site_id": "PLANT-KPK-02", "ntn_raw": "NTN-2289104-5", "iban_raw": "PK52KHYB0000003344556677"},
+    {"vendor_id": "V-1006", "name": "Punjab Dairy & Cocoa Ingredients Co", "commodity": "Skimmed Milk Powder & Alkalized Cocoa", "contract_unit_price_pkr": 920.0, "uom": "KG", "site_id": "PLANT-LHE-03", "ntn_raw": "NTN-4891203-2", "iban_raw": "PK83UBLX0000002211334455"},
+    {"vendor_id": "V-1007", "name": "Karachi Industrial Engineering Spares", "commodity": "Oven Conveyor Bearings & Burners", "contract_unit_price_pkr": 24500.0, "uom": "SET", "site_id": "PLANT-KHI-01", "ntn_raw": "NTN-1902384-6", "iban_raw": "PK28BAHL0000006677889900"},
+    {"vendor_id": "V-1008", "name": "Haripur Industrial Chemicals & Flavours", "commodity": "Food Grade Vanilla & Leavening Agents", "contract_unit_price_pkr": 1450.0, "uom": "KG", "site_id": "PLANT-KPK-02", "ntn_raw": "NTN-2781902-1", "iban_raw": "PK64ALFH0000005544332211"}
+]
+
+for v in vendors:
+    v["ntn_masked"] = mask_ntn(v["ntn_raw"])
+    v["iban_masked"] = mask_iban(v["iban_raw"])
+
+# ==============================================================================
+# GROUND-TRUTH SEEDED TRANSACTIONS & BREACHES (POPULATION + EXCEPTIONS)
+# ==============================================================================
+# We build a rich population of 120 detailed transactions/records across the 3 process families
+# containing 28 seeded ground-truth control breaches + 6 legitimate look-alike edge cases
+# (so precision, recall, and false-clear rate are realistic and non-trivial!).
+
+seeded_exceptions_and_population = [
+    # --- PROCURE TO PAY: PTP-01 (Duplicate Invoices) ---
+    {
+        "record_id": "TXN-PTP-001",
+        "control_id": "PTP-01",
+        "process_family": "Procure-to-Pay (P2P)",
+        "site_id": "PLANT-KHI-01",
+        "province": "Sindh",
+        "entity_name": "Sindh Fine Roller Flour Mills Ltd (V-1001)",
+        "sap_doc_no": "MIRO-5105609102 / MIRO-5105609148",
+        "po_no": "PO-4500118201",
+        "grn_no": "GRN-5000881201",
+        "posting_date": "2026-10-08",
+        "amount_pkr": 1770000.0,
+        "masked_identifiers": {"vendor_ntn": "NTN-*****84-3", "vendor_iban": "PK36SCBL************9821"},
+        "rule_triggered": True,
+        "rule_flag_reason": "Duplicate Supplier Tax Invoice detected: Supplier Invoice 'SFRM-2026-8841' posted on 2026-10-04 (MIRO-5105609102) and re-posted on 2026-10-08 as 'SFRM-2026-8841-A' (MIRO-5105609148) for identical PKR 1,770,000 (15,000 KG Fine Biscuit Flour @ PKR 118/KG) against a single GRN-5000881201.",
+        "evidence_doc_id": "EVID-PTP-001",
+        "evidence_text": "OCR SCAN [Invoice 1: SFRM-2026-8841, Date: 04-Oct-2026, Qty: 15,000 KG Fine Biscuit Flour, Rate: PKR 118/KG, Total: PKR 1,770,000, GRN Ref: GRN-5000881201, Stamp: RECEIVED KHI AP]. OCR SCAN [Invoice 2: SFRM-2026-8841-A, Date: 04-Oct-2026, Qty: 15,000 KG Fine Biscuit Flour, Rate: PKR 118/KG, Total: PKR 1,770,000, GRN Ref: GRN-5000881201, Handwritten note: 'Resubmitted copy from transporter'].",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Non-Compliant / High Risk",
+        "regulatory_clauses": ["SECP-CA2017-S220", "FBR-STA1990-S22-23"]
+    },
+    {
+        "record_id": "TXN-PTP-002",
+        "control_id": "PTP-01",
+        "process_family": "Procure-to-Pay (P2P)",
+        "site_id": "PLANT-LHE-03",
+        "province": "Punjab",
+        "entity_name": "Pak Flexo BOPP Packaging Films Ltd (V-1004)",
+        "sap_doc_no": "MIRO-5105609310 / MIRO-5105609355",
+        "po_no": "PO-4500118410",
+        "grn_no": "GRN-5000881540",
+        "posting_date": "2026-10-12",
+        "amount_pkr": 1360000.0,
+        "masked_identifiers": {"vendor_ntn": "NTN-*****21-8", "vendor_iban": "PK19MCIB************4321"},
+        "rule_triggered": True,
+        "rule_flag_reason": "Exact amount + date match with normalized invoice number: 'PF-INV/9920' (MIRO-5105609310) and 'PFINV9920' (MIRO-5105609355) both billed PKR 1,360,000 for 2,000 KG Printed BOPP Film.",
+        "evidence_doc_id": "EVID-PTP-002",
+        "evidence_text": "OCR SCAN [Supplier Tax Invoice PF-INV/9920 dated 10-Oct-2026 for 2,000 KG BOPP Film @ PKR 680/KG = PKR 1,360,000]. Second voucher MIRO-5105609355 entered by AP Clerk without slash 'PFINV9920' attaching the same delivery challan DC-4410 and GRN-5000881540.",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Non-Compliant / High Risk",
+        "regulatory_clauses": ["SECP-CA2017-S220", "FBR-STA1990-S22-23"]
+    },
+    {
+        "record_id": "TXN-PTP-003",
+        "control_id": "PTP-01",
+        "process_family": "Procure-to-Pay (P2P)",
+        "site_id": "PLANT-KHI-01",
+        "province": "Sindh",
+        "entity_name": "Mehran Refined Sugar & Allied Mills (V-1002)",
+        "sap_doc_no": "MIRO-5105609401 / MIRO-5105609409",
+        "po_no": "PO-4500118500",
+        "grn_no": "GRN-5000881610 / GRN-5000881611",
+        "posting_date": "2026-10-14",
+        "amount_pkr": 1420000.0,
+        "masked_identifiers": {"vendor_ntn": "NTN-*****31-7", "vendor_iban": "PK44HABB************1234"},
+        "rule_triggered": True,
+        "rule_flag_reason": "Same vendor V-1002 + identical invoice amount PKR 1,420,000 on same date 2026-10-14 across MIRO-5105609401 and MIRO-5105609409.",
+        "evidence_doc_id": "EVID-PTP-003",
+        "evidence_text": "OCR SCAN [Invoice MRS-7701 against Truck #KHI-9921, Weighbridge Slip WB-1041, GRN-5000881610 for 10,000 KG Sugar = PKR 1,420,000] AND [Invoice MRS-7702 against second Truck #KHI-8814, Weighbridge Slip WB-1042, GRN-5000881611 for a separate 10,000 KG Sugar delivery on 14-Oct-2026 = PKR 1,420,000]. Both trucks verified at Port Qasim gate.",
+        "is_seeded_breach": False,
+        "ground_truth_rating": "Compliant",
+        "regulatory_clauses": ["SECP-CA2017-S220", "FBR-STA1990-S22-23"]
+    },
+    {
+        "record_id": "TXN-PTP-004",
+        "control_id": "PTP-01",
+        "process_family": "Procure-to-Pay (P2P)",
+        "site_id": "PLANT-KPK-02",
+        "province": "Khyber Pakhtunkhwa",
+        "entity_name": "Hattar Corrugated Cartons & Board (V-1005)",
+        "sap_doc_no": "MIRO-5105609512 / MIRO-5105609580",
+        "po_no": "PO-4500118622",
+        "grn_no": "GRN-5000881790",
+        "posting_date": "2026-10-16",
+        "amount_pkr": 680000.0,
+        "masked_identifiers": {"vendor_ntn": "NTN-*****04-5", "vendor_iban": "PK52KHYB************6677"},
+        "rule_triggered": True,
+        "rule_flag_reason": "Duplicate invoice reference 'HCC-2026-319' posted via MIRO-5105609512 and Direct FI Invoice FB60-190044120 (MIRO-5105609580) for PKR 680,000 (8,000 Master Cartons).",
+        "evidence_doc_id": "EVID-PTP-004",
+        "evidence_text": "OCR SCAN [Invoice HCC-2026-319 dated 15-Oct-2026 for 8,000 pcs 5-Ply Cartons @ PKR 85 = PKR 680,000]. First booked against PO-4500118622 (MIRO-5105609512), then booked a second time as a direct FI-AP voucher bypassing PO matching on 16-Oct-2026.",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Non-Compliant / High Risk",
+        "regulatory_clauses": ["SECP-CA2017-S220", "FBR-STA1990-S22-23"]
+    },
+
+    # --- PROCURE TO PAY: PTP-02 (Split Purchase Orders) ---
+    {
+        "record_id": "TXN-PTP-005",
+        "control_id": "PTP-02",
+        "process_family": "Procure-to-Pay (P2P)",
+        "site_id": "PLANT-KHI-01",
+        "province": "Sindh",
+        "entity_name": "Karachi Industrial Engineering Spares (V-1007)",
+        "sap_doc_no": "PO-4500118701 / PO-4500118702 / PO-4500118703",
+        "po_no": "PO-4500118701..03",
+        "grn_no": "GRN-5000881901..03",
+        "posting_date": "2026-10-11",
+        "amount_pkr": 1445500.0,
+        "masked_identifiers": {"vendor_ntn": "NTN-*****84-6", "vendor_iban": "PK28BAHL************9900"},
+        "rule_triggered": True,
+        "rule_flag_reason": "3 consecutive Purchase Orders created by Buyer USR-BUYER-KHI02 to Vendor V-1007 within 6 hours on 2026-10-11 for PKR 490,000, PKR 490,000, and PKR 465,500 (Total = PKR 1,445,500). Each PO is just below the PKR 500,000 Plant Manager DoA threshold.",
+        "evidence_doc_id": "EVID-PTP-005",
+        "evidence_text": "SAP PR/PO Header Text & Supplier Quotation Q-KIES-882: Single supplier quotation Q-KIES-882 dated 10-Oct-2026 for Complete Rotary Biscuit Oven Overhaul Kit totaling PKR 1,445,500 (59 bearing sets). Buyer split the single quotation into 3 separate POs (PO-4500118701 at 09:14, PO-4500118702 at 11:02, PO-4500118703 at 14:40) each under PKR 500,000 to avoid Head of Procurement & Finance Controller approval.",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Non-Compliant / High Risk",
+        "regulatory_clauses": ["SECP-CA2017-S223", "FBR-ITO2001-S153-174"]
+    },
+    {
+        "record_id": "TXN-PTP-006",
+        "control_id": "PTP-02",
+        "process_family": "Procure-to-Pay (P2P)",
+        "site_id": "PLANT-KPK-02",
+        "province": "Khyber Pakhtunkhwa",
+        "entity_name": "Haripur Industrial Chemicals & Flavours (V-1008)",
+        "sap_doc_no": "PO-4500118750 / PO-4500118751",
+        "po_no": "PO-4500118750..51",
+        "grn_no": "GRN-5000881950..51",
+        "posting_date": "2026-10-15",
+        "amount_pkr": 957000.0,
+        "masked_identifiers": {"vendor_ntn": "NTN-*****02-1", "vendor_iban": "PK64ALFH************2211"},
+        "rule_triggered": True,
+        "rule_flag_reason": "2 Purchase Orders issued to V-1008 within 24 hours (PKR 478,500 + PKR 478,500 = PKR 957,000), each individually below the PKR 500,000 Plant Manager threshold.",
+        "evidence_doc_id": "EVID-PTP-006",
+        "evidence_text": "Email & SAP Text attached to PO-4500118750/51: Single indent IND-KPK-409 for 660 KG Food Grade Vanilla Powder @ PKR 1,450/KG = PKR 957,000 split into two equal lots of 330 KG (PKR 478,500 each) delivered on the same truck #KPK-3312. No Head Office Procurement sign-off obtained.",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Non-Compliant / High Risk",
+        "regulatory_clauses": ["SECP-CA2017-S223", "FBR-ITO2001-S153-174"]
+    },
+    {
+        "record_id": "TXN-PTP-007",
+        "control_id": "PTP-02",
+        "process_family": "Procure-to-Pay (P2P)",
+        "site_id": "PLANT-LHE-03",
+        "province": "Punjab",
+        "entity_name": "Punjab Dairy & Cocoa Ingredients Co (V-1006)",
+        "sap_doc_no": "PO-4500118810 / PO-4500118829",
+        "po_no": "PO-4500118810, PO-4500118829",
+        "grn_no": "GRN-5000882010",
+        "posting_date": "2026-10-18",
+        "amount_pkr": 828000.0,
+        "masked_identifiers": {"vendor_ntn": "NTN-*****03-2", "vendor_iban": "PK83UBLX************4455"},
+        "rule_triggered": True,
+        "rule_flag_reason": "Two POs to V-1006 within 48 hours: PO-4500118810 (PKR 460,000) and PO-4500118829 (PKR 368,000) totaling PKR 828,000.",
+        "evidence_doc_id": "EVID-PTP-007",
+        "evidence_text": "SAP Production Breakdown Ticket BD-LHE-119 & Head of Procurement Emergency Approval Email (Ref: HOP-2026-1018): First PO-4500118810 was scheduled weekly Skimmed Milk Powder for Line-1. Second PO-4500118829 was raised 36 hours later for Alkalized Cocoa after an urgent export order batch addition, and carries explicit written post-facto ratification from the Head of Procurement.",
+        "is_seeded_breach": False,
+        "ground_truth_rating": "Observation / Low Risk",
+        "regulatory_clauses": ["SECP-CA2017-S223"]
+    },
+
+    # --- PROCURE TO PAY: PTP-03 (Contract Price Override & Three-Way Match) ---
+    {
+        "record_id": "TXN-PTP-008",
+        "control_id": "PTP-03",
+        "process_family": "Procure-to-Pay (P2P)",
+        "site_id": "PLANT-LHE-03",
+        "province": "Punjab",
+        "entity_name": "Pak Flexo BOPP Packaging Films Ltd (V-1004)",
+        "sap_doc_no": "MIRO-5105609604",
+        "po_no": "PO-4500118902",
+        "grn_no": "GRN-5000882115",
+        "posting_date": "2026-10-19",
+        "amount_pkr": 2235000.0,
+        "masked_identifiers": {"vendor_ntn": "NTN-*****21-8", "vendor_iban": "PK19MCIB************4321"},
+        "rule_triggered": True,
+        "rule_flag_reason": "Billed unit rate PKR 745.00/KG on 3,000 KG Printed BOPP Film exceeds locked SAP Info Record ME13 contract price of PKR 680.00/KG by +9.56% (overpayment of PKR 195,000).",
+        "evidence_doc_id": "EVID-PTP-008",
+        "evidence_text": "SAP ME13 Contract #460000192 valid 01-Jul-2026 to 31-Dec-2026 fixes rate at PKR 680.00/KG. Buyer manually overrode PO-4500118902 price to PKR 745.00/KG citing 'verbal resin increase request from vendor' with no signed Contract Price Addendum from Head of Procurement.",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Non-Compliant / High Risk",
+        "regulatory_clauses": ["SECP-CA2017-S230", "FBR-STA1990-S22-23"]
+    },
+    {
+        "record_id": "TXN-PTP-009",
+        "control_id": "PTP-03",
+        "process_family": "Procure-to-Pay (P2P)",
+        "site_id": "PLANT-KHI-01",
+        "province": "Sindh",
+        "entity_name": "Port Qasim Edible Oils & Palm Refinery (V-1003)",
+        "sap_doc_no": "MIRO-5105609688",
+        "po_no": "PO-4500118955",
+        "grn_no": "GRN-5000882204",
+        "posting_date": "2026-10-20",
+        "amount_pkr": 4180000.0,
+        "masked_identifiers": {"vendor_ntn": "NTN-*****41-9", "vendor_iban": "PK71MEZN************7890"},
+        "rule_triggered": True,
+        "rule_flag_reason": "Three-Way Match Quantity & Price Breach: Supplier Invoice billed for 10,000 KG RBD Palm Olein @ PKR 418/KG (PKR 4,180,000), whereas Weighbridge GRN-5000882204 accepted only 9,650 KG and Contract Rate is PKR 395/KG (Authorized Payable = PKR 3,811,750; Variance = PKR 368,250).",
+        "evidence_doc_id": "EVID-PTP-009",
+        "evidence_text": "Weighbridge Ticket WB-KHI-8832 shows net oil received = 9,650 KG (350 KG transit shortage noted by QA). Furthermore, SAP Contract ME13-302 fixes rate at PKR 395/KG. AP manually overrode the SAP MIRO quantity block to pay full 10,000 KG @ PKR 418/KG.",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Non-Compliant / High Risk",
+        "regulatory_clauses": ["SECP-CA2017-S220", "SECP-CA2017-S230", "FBR-STA1990-S22-23"]
+    },
+
+    # --- PAYROLL & LABOUR LAW: PAY-01 (Wages Below Notified Provincial Minimum) ---
+    {
+        "record_id": "TXN-PAY-001",
+        "control_id": "PAY-01",
+        "process_family": "Payroll, HR & Labour-Law Compliance",
+        "site_id": "PLANT-KHI-01",
+        "province": "Sindh",
+        "entity_name": "Indus Workforce Solutions Pvt Ltd (SP-001 — 38 Packing Workers Batch)",
+        "sap_doc_no": "IR-WAGE-KHI-2026-10-SP001",
+        "po_no": "PO-4500117001",
+        "grn_no": "SES-10004510",
+        "posting_date": "2026-10-05",
+        "amount_pkr": 1216000.0,
+        "masked_identifiers": {"sample_worker_cnic": "42101-*******-3", "contractor_ntn": "NTN-*****82-1", "contractor_iban": "PK24HABB************4301"},
+        "rule_triggered": True,
+        "rule_flag_reason": "38 full-time biscuit packing workers at Karachi Factory (Sindh) worked 26 standard days in October 2026 but were paid gross base monthly wage of PKR 32,000/worker—PKR 5,000/month below the Sindh Minimum Wage Notification floor of PKR 37,000/month (Total monthly underpayment = PKR 190,000).",
+        "evidence_doc_id": "EVID-PAY-001",
+        "evidence_text": "IR Audit Application Upload [SP-001 October 2026 Wage Sheet & ZKTeco Attendance Summary]: Workers EMP-C-1001 through EMP-C-1038 logged 26 full 8-hour shifts (208 hrs) at Port Qasim Biscuit Packing Line. Disbursed basic + statutory allowance = PKR 32,000/month per worker. Sindh Minimum Wages Act 2015 Gazette Notification mandates PKR 37,000/month.",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Non-Compliant / High Risk",
+        "regulatory_clauses": ["SINDH-MW-2015-NOTIF", "SINDH-FA2015-S51-66"]
+    },
+    {
+        "record_id": "TXN-PAY-002",
+        "control_id": "PAY-01",
+        "process_family": "Payroll, HR & Labour-Law Compliance",
+        "site_id": "PLANT-KPK-02",
+        "province": "Khyber Pakhtunkhwa",
+        "entity_name": "Hattar Peak Labour Supply Agency (SP-006 — 24 Wafer Line Helpers)",
+        "sap_doc_no": "IR-WAGE-KPK-2026-10-SP006",
+        "po_no": "PO-4500117006",
+        "grn_no": "SES-10004522",
+        "posting_date": "2026-10-06",
+        "amount_pkr": 744000.0,
+        "masked_identifiers": {"sample_worker_cnic": "13302-*******-9", "contractor_ntn": "NTN-*****81-6", "contractor_iban": "PK12KHYB************5506"},
+        "rule_triggered": True,
+        "rule_flag_reason": "24 full-time wafer line helpers at Hattar Factory (KP) paid base monthly wage of PKR 31,000/month for 26 working days, violating the KP Minimum Wages Act 2013 notified floor of PKR 36,000/month (Shortfall = PKR 5,000/worker; Total = PKR 120,000). Contractor attempted to include 28 hours of overtime (PKR 5,500) to make gross pay appear as PKR 36,500.",
+        "evidence_doc_id": "EVID-PAY-002",
+        "evidence_text": "Contractor Wage Register SP-006 (Hattar Plant): Basic Wage column shows PKR 31,000 for 26 days + Overtime PKR 5,500 = Total PKR 36,500. Under KP Minimum Wages Act 2013 & KP Factories Act 2013 Sec 47, statutory minimum wage of PKR 36,000 applies to normal working hours (excluding overtime).",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Non-Compliant / High Risk",
+        "regulatory_clauses": ["KPK-MW-2013-NOTIF", "KPK-FA2013-S34-47"]
+    },
+    {
+        "record_id": "TXN-PAY-003",
+        "control_id": "PAY-01",
+        "process_family": "Payroll, HR & Labour-Law Compliance",
+        "site_id": "PLANT-LHE-03",
+        "province": "Punjab",
+        "entity_name": "Sundar Estate Technical & Housekeeping Co (SP-015 — 19 Sanitation Workers)",
+        "sap_doc_no": "IR-WAGE-LHE-2026-10-SP015",
+        "po_no": "PO-4500117015",
+        "grn_no": "SES-10004589",
+        "posting_date": "2026-10-07",
+        "amount_pkr": 636500.0,
+        "masked_identifiers": {"sample_worker_cnic": "35202-*******-1", "contractor_ntn": "NTN-*****29-6", "contractor_iban": "PK40MEZN************5015"},
+        "rule_triggered": True,
+        "rule_flag_reason": "19 sanitation workers at Lahore Factory (Punjab) received net basic pay of PKR 33,500/month for 26 days after contractor deducted PKR 3,500/worker for 'uniform, boots & canteen tools', reducing wages below the Punjab Minimum Wage floor of PKR 37,000/month.",
+        "evidence_doc_id": "EVID-PAY-003",
+        "evidence_text": "SP-015 Payroll Sheet (Sundar Plant Lahore): Nominal Gross shown as PKR 37,000, less 'Contractor Uniform & Cleaning Kit Deduction' of PKR 3,500 = PKR 33,500 paid. Under Punjab Minimum Wages Ordinance 1961 & Payment of Wages Act 1936, deductions for employer-mandated PPE/tools that reduce wages below PKR 37,000 are unlawful.",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Non-Compliant / High Risk",
+        "regulatory_clauses": ["PUNJAB-MW-1961-NOTIF", "PUNJAB-FA1934-S34-49"]
+    },
+    {
+        "record_id": "TXN-PAY-004",
+        "control_id": "PAY-01",
+        "process_family": "Payroll, HR & Labour-Law Compliance",
+        "site_id": "PLANT-KHI-01",
+        "province": "Sindh",
+        "entity_name": "Direct Factory Operator — Muhammadoman Qureshi (EMP-10492)",
+        "sap_doc_no": "PAYR-2026-10-KHI-10492",
+        "po_no": "N/A (Direct Payroll)",
+        "grn_no": "N/A",
+        "posting_date": "2026-10-28",
+        "amount_pkr": 21346.0,
+        "masked_identifiers": {"employee_cnic": "42201-*******-7", "employee_iban": "PK55HABB************8812"},
+        "rule_triggered": True,
+        "rule_flag_reason": "Gross basic salary paid in October 2026 is PKR 21,346, which is below the Sindh Minimum Wage floor of PKR 37,000.",
+        "evidence_doc_id": "EVID-PAY-004",
+        "evidence_text": "SAP PA0000 Hiring Action & ZKTeco Attendance Log: Employee EMP-10492 joined on 14-Oct-2026 at contracted monthly basic salary of PKR 37,000/month. Worked 15 out of 26 working days in October; pro-rated payout = (15 / 26) * 37,000 = PKR 21,346.15. Full monthly rate is compliant at PKR 37,000.",
+        "is_seeded_breach": False,
+        "ground_truth_rating": "Compliant",
+        "regulatory_clauses": ["SINDH-MW-2015-NOTIF"]
+    },
+
+    # --- PAYROLL & LABOUR LAW: PAY-02 (Payments to Inactive / Terminated / Ghost Employees) ---
+    {
+        "record_id": "TXN-PAY-005",
+        "control_id": "PAY-02",
+        "process_family": "Payroll, HR & Labour-Law Compliance",
+        "site_id": "PLANT-KHI-01",
+        "province": "Sindh",
+        "entity_name": "Former Shift Supervisor — Kamran Siddiqui (EMP-10184)",
+        "sap_doc_no": "PAYR-2026-10-KHI-10184",
+        "po_no": "N/A (Direct Payroll)",
+        "grn_no": "N/A",
+        "posting_date": "2026-10-28",
+        "amount_pkr": 94500.0,
+        "masked_identifiers": {"employee_cnic": "42101-*******-5", "employee_iban": "PK11MEZN************3390"},
+        "rule_triggered": True,
+        "rule_flag_reason": "Employee EMP-10184 resigned effective 2026-08-31 (SAP PA0000 Status = Separated, ZKTeco Biometric Punches in Oct 2026 = 0), yet received full regular monthly salary of PKR 94,500 in the October 2026 payroll run (Wage Type 1000 Regular Pay, not Final Settlement).",
+        "evidence_doc_id": "EVID-PAY-005",
+        "evidence_text": "HR Exit Clearance Form EXIT-KHI-2026-089 signed 31-Aug-2026 confirms Kamran Siddiqui handed over plant ID card and completed final settlement in September 2026. However, Payroll Clerk failed to lock Payroll Area in SAP Infotype 0003, resulting in an unauthorized October 2026 salary transfer of PKR 94,500.",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Non-Compliant / High Risk",
+        "regulatory_clauses": ["SECP-CA2017-S223", "SINDH-FA2015-S51-66"]
+    },
+    {
+        "record_id": "TXN-PAY-006",
+        "control_id": "PAY-02",
+        "process_family": "Payroll, HR & Labour-Law Compliance",
+        "site_id": "PLANT-LHE-03",
+        "province": "Punjab",
+        "entity_name": "Terminated Kneading Operator — Tariq Mehmood (EMP-30219) & Contractor Ghost Worker (EMP-C-3112)",
+        "sap_doc_no": "PAYR-2026-10-LHE-30219",
+        "po_no": "PO-4500117011",
+        "grn_no": "SES-10004570",
+        "posting_date": "2026-10-28",
+        "amount_pkr": 82000.0,
+        "masked_identifiers": {"employee_cnic": "35201-*******-4", "employee_iban": "PK72BOPU************6120"},
+        "rule_triggered": True,
+        "rule_flag_reason": "Two inactive personnel at Lahore Plant paid in Oct 2026: (1) EMP-30219 terminated on 2026-09-10 with 0 biometric punches in Oct 2026 paid PKR 45,000 regular salary; (2) Contractor SP-011 worker EMP-C-3112 billed PKR 37,000 despite 0 ZKTeco turnstile entries for 45 consecutive days.",
+        "evidence_doc_id": "EVID-PAY-006",
+        "evidence_text": "ZKTeco Biometric Turnstile Log (PLANT-LHE-03) shows Last Punch for EMP-30219 on 10-Sep-2026 and Last Punch for EMP-C-3112 on 02-Sep-2026. No approved medical or annual leave exists in SAP PA2001 or IR records. Both were disbursed full October 2026 wages.",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Non-Compliant / High Risk",
+        "regulatory_clauses": ["PUNJAB-FA1934-S34-49", "SECP-CA2017-S223"]
+    },
+    {
+        "record_id": "TXN-PAY-007",
+        "control_id": "PAY-02",
+        "process_family": "Payroll, HR & Labour-Law Compliance",
+        "site_id": "PLANT-KPK-02",
+        "province": "Khyber Pakhtunkhwa",
+        "entity_name": "Retired Maintenance Foreman — Gul Zaman Khan (EMP-20045)",
+        "sap_doc_no": "PAYR-2026-10-KPK-20045",
+        "po_no": "N/A (Direct Payroll)",
+        "grn_no": "N/A",
+        "posting_date": "2026-10-28",
+        "amount_pkr": 412000.0,
+        "masked_identifiers": {"employee_cnic": "13101-*******-2", "employee_iban": "PK49KHYB************1108"},
+        "rule_triggered": True,
+        "rule_flag_reason": "Employee EMP-20045 status is Separated (Retirement Date: 2026-09-30) with 0 biometric punches in October 2026, and received a payout of PKR 412,000 in October 2026.",
+        "evidence_doc_id": "EVID-PAY-007",
+        "evidence_text": "SAP Payroll Wage Type Breakdown & HR Gratuity Sanction Memo (Ref: HR-KPK-FFS-20045): Payment of PKR 412,000 is booked under Wage Type 9F01 (Full & Final Gratuity + Leave Encashment Settlement) duly signed by Head of HR and Finance Controller following retirement on 30-Sep-2026. Regular basic pay (Wage Type 1000) is PKR 0.",
+        "is_seeded_breach": False,
+        "ground_truth_rating": "Compliant",
+        "regulatory_clauses": ["KPK-FA2013-S34-47", "SECP-CA2017-S223"]
+    },
+
+    # --- PAYROLL & LABOUR LAW: PAY-03 (EOBI, SESSI/PESSI/ESSI & Overtime Compliance) ---
+    {
+        "record_id": "TXN-PAY-008",
+        "control_id": "PAY-03",
+        "process_family": "Payroll, HR & Labour-Law Compliance",
+        "site_id": "PLANT-KPK-02",
+        "province": "Khyber Pakhtunkhwa",
+        "entity_name": "Northern Corridor Logistics & Haulage (SP-009) & Hazara Facility Support (SP-010)",
+        "sap_doc_no": "IR-AUDIT-KPK-2026-10-EOBI",
+        "po_no": "PO-4500117009 / PO-4500117010",
+        "grn_no": "SES-10004601",
+        "posting_date": "2026-10-18",
+        "amount_pkr": 318600.0,
+        "masked_identifiers": {"contractor_ntn": "NTN-*****23-7", "eobi_reg_masked": "EOBI-KPK-*****91"},
+        "rule_triggered": True,
+        "rule_flag_reason": "Out of 130 active contracted workers deployed at Hattar Plant by SP-009 (75 workers) and SP-010 (55 workers) per ZKTeco turnstile logs, EOBI PR-02A schedule and ESSI KP contribution challans were deposited for only 71 workers—leaving 59 workers unregistered and unpaid for EOBI/ESSI.",
+        "evidence_doc_id": "EVID-PAY-008",
+        "evidence_text": "IR Audit Application Reconciliation [Oct 2026]: Biometric active roster for SP-009 + SP-010 = 130 workers. Uploaded EOBI PR-02A Bank Challan #998120 shows contribution paid for only 71 workers. Under EOBI Act 1976 Sec 9, the Company as Principal Employer faces statutory joint liability for the 59 omitted workers.",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Non-Compliant / High Risk",
+        "regulatory_clauses": ["EOBI-1976-S9-11", "KPK-FA2013-S34-47"]
+    },
+    {
+        "record_id": "TXN-PAY-009",
+        "control_id": "PAY-03",
+        "process_family": "Payroll, HR & Labour-Law Compliance",
+        "site_id": "PLANT-LHE-03",
+        "province": "Punjab",
+        "entity_name": "Ravi Industrial Manpower Services (SP-011 — Cupcake Oven Shift B)",
+        "sap_doc_no": "IR-AUDIT-LHE-2026-10-OT",
+        "po_no": "PO-4500117011",
+        "grn_no": "SES-10004615",
+        "posting_date": "2026-10-21",
+        "amount_pkr": 284000.0,
+        "masked_identifiers": {"contractor_ntn": "NTN-*****83-5", "pessi_reg_masked": "PESSI-LHE-*****44"},
+        "rule_triggered": True,
+        "rule_flag_reason": "42 contract workers on Cupcake Oven Line-2 logged 64 hours/week in ZKTeco biometrics (16 hours overtime above 48h statutory limit) for 3 consecutive weeks, and overtime was paid at 1.0x single rate instead of the statutory 2.0x double rate required under Factories Act 1934 Sec 47.",
+        "evidence_doc_id": "EVID-PAY-009",
+        "evidence_text": "ZKTeco Shift Report (PLANT-LHE-03 Line-2) & SP-011 Overtime Sheet: 42 workers worked 16 OT hours/week @ single hourly rate (PKR 177.88/hr) instead of double rate (PKR 355.77/hr), resulting in PKR 284,000 overtime underpayment and weekly hours exceeding statutory limits.",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Non-Compliant / High Risk",
+        "regulatory_clauses": ["PUNJAB-FA1934-S34-49", "EOBI-1976-S9-11"]
+    },
+
+    # --- IT USER ACCESS & SoD: ITG-01 & ITG-02 ---
+    {
+        "record_id": "TXN-ITG-001",
+        "control_id": "ITG-01",
+        "process_family": "IT User Access & Segregation of Duties (SoD)",
+        "site_id": "HO-KHI-00",
+        "province": "Sindh",
+        "entity_name": "SAP User: USR-AP-FIN04 (Senior AP Executive — Head Office)",
+        "sap_doc_no": "SOD-SCAN-2026-10-USR-AP-FIN04",
+        "po_no": "N/A (SAP GRC / USR02)",
+        "grn_no": "SM20-LOG-88210",
+        "posting_date": "2026-10-22",
+        "amount_pkr": 3450000.0,
+        "masked_identifiers": {"user_cnic": "42301-*******-9", "sap_user_id": "USR-AP-FIN04"},
+        "rule_triggered": True,
+        "rule_flag_reason": "Critical SoD Conflict: User USR-AP-FIN04 holds both Role Z_FI_VENDOR_MASTER_MAINT (T-Codes FK01/FK02 to create/edit supplier bank IBANs) AND Role Z_FI_AP_PAYMENT_RUN (T-Codes MIRO/FB60/F110 to post invoices and execute bank payments).",
+        "evidence_doc_id": "EVID-ITG-001",
+        "evidence_text": "SAP SM20 Security Audit Log (01-Oct to 22-Oct-2026): User USR-AP-FIN04 executed FK02 on 11-Oct-2026 to modify bank IBAN on Vendor V-1007, and subsequently executed MIRO and F110 payment run for PKR 3,450,000 to the same vendor on 14-Oct-2026 without independent master-data review.",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Non-Compliant / High Risk",
+        "regulatory_clauses": ["SECP-CA2017-S223", "PECA-2016-S3-16", "IIA-GIAS-STD-12-2"]
+    },
+    {
+        "record_id": "TXN-ITG-002",
+        "control_id": "ITG-01",
+        "process_family": "IT User Access & Segregation of Duties (SoD)",
+        "site_id": "PLANT-KHI-01",
+        "province": "Sindh",
+        "entity_name": "SAP User: USR-PROC-KHI01 (Plant Procurement Officer — Karachi)",
+        "sap_doc_no": "SOD-SCAN-2026-10-USR-PROC-KHI01",
+        "po_no": "PO-4500118990",
+        "grn_no": "SM20-LOG-88245",
+        "posting_date": "2026-10-22",
+        "amount_pkr": 1890000.0,
+        "masked_identifiers": {"user_cnic": "42101-*******-8", "sap_user_id": "USR-PROC-KHI01"},
+        "rule_triggered": True,
+        "rule_flag_reason": "Critical SoD Conflict: User USR-PROC-KHI01 holds both Role Z_MM_PO_CREATE (`ME21N`) and Role Z_MM_PO_RELEASE (`ME29N`) plus Goods Receipt (`MIGO`), enabling single-user creation, release, and receipt of Purchase Orders.",
+        "evidence_doc_id": "EVID-ITG-002",
+        "evidence_text": "IT Service Desk Ticket INC-44102 & SAP SM20 Log: User was granted temporary `ME29N` release rights during Plant Manager's annual leave in August 2026 (supposed to expire 15-Aug-2026), but the role was never revoked. In October 2026, user both created (`ME21N`) and released (`ME29N`) 4 POs totaling PKR 1,890,000.",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Non-Compliant / High Risk",
+        "regulatory_clauses": ["SECP-CA2017-S223", "IIA-GIAS-STD-12-2"]
+    },
+    {
+        "record_id": "TXN-ITG-003",
+        "control_id": "ITG-02",
+        "process_family": "IT User Access & Segregation of Duties (SoD)",
+        "site_id": "PLANT-KPK-02",
+        "province": "Khyber Pakhtunkhwa",
+        "entity_name": "SAP User: USR-STORE-KPK03 (Separated Storekeeper — Hattar Factory)",
+        "sap_doc_no": "SOD-SCAN-2026-10-USR-STORE-KPK03",
+        "po_no": "N/A",
+        "grn_no": "MIGO-5000882401",
+        "posting_date": "2026-10-23",
+        "amount_pkr": 425000.0,
+        "masked_identifiers": {"user_cnic": "13301-*******-6", "sap_user_id": "USR-STORE-KPK03"},
+        "rule_triggered": True,
+        "rule_flag_reason": "Active Unblocked SAP User (`UFLAG = 0`) for separated employee EMP-20198 (Exit Date: 2026-09-25). Account logged in on 2026-10-17 from plant terminal to post Inventory Write-Off (`MIGO` Movement Type 551) of PKR 425,000.",
+        "evidence_doc_id": "EVID-ITG-003",
+        "evidence_text": "SAP USR02 & SM20 Audit Trail: Employee EMP-20198 left the Company on 25-Sep-2026. Account USR-STORE-KPK03 remained unlocked and was used on 17-Oct-2026 (22 days after separation) to post scrap write-off document MIGO-5000882401 for 5,000 cartons.",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Non-Compliant / High Risk",
+        "regulatory_clauses": ["PECA-2016-S3-16", "SECP-CA2017-S223"]
+    },
+    {
+        "record_id": "TXN-ITG-004",
+        "control_id": "ITG-01",
+        "process_family": "IT User Access & Segregation of Duties (SoD)",
+        "site_id": "PLANT-LHE-03",
+        "province": "Punjab",
+        "entity_name": "SAP User: USR-BASIS-FF01 (Emergency Firefighter ID — Lahore Plant)",
+        "sap_doc_no": "SOD-SCAN-2026-10-USR-BASIS-FF01",
+        "po_no": "N/A",
+        "grn_no": "FF-LOG-2026-1012",
+        "posting_date": "2026-10-12",
+        "amount_pkr": 0.0,
+        "masked_identifiers": {"user_cnic": "35202-*******-8", "sap_user_id": "USR-BASIS-FF01"},
+        "rule_triggered": True,
+        "rule_flag_reason": "User ID USR-BASIS-FF01 holds broad basis & transaction profile (`SAP_ALL` equivalent) flagged by automated SoD scan.",
+        "evidence_doc_id": "EVID-ITG-004",
+        "evidence_text": "SAP GRC Emergency Access Management (EAM) Log FF-LOG-2026-1012: ID is a locked Firefighter account checked out for 90 minutes on 12-Oct-2026 under Change Ticket CHG-9941 to fix a stuck idoc batch job. Zero financial or master-data transactions (`FK01/MIRO/F110/ME21N`) were executed, and the session log was reviewed and signed off by the Head of IT on 13-Oct-2026.",
+        "is_seeded_breach": False,
+        "ground_truth_rating": "Compliant",
+        "regulatory_clauses": ["SECP-CA2017-S223", "IIA-GIAS-STD-12-2"]
+    }
+]
+
+# Add additional seeded breaches and clean transactions so the population has:
+# Total evaluated exception candidates = 30 items (24 True Seeded Breaches + 6 Legitimate Look-Alike Edge Cases)
+# Plus background population statistics representing 100% full-population scan across the Company.
+additional_items = [
+    {
+        "record_id": "TXN-PTP-010",
+        "control_id": "PTP-01",
+        "process_family": "Procure-to-Pay (P2P)",
+        "site_id": "PLANT-KHI-01",
+        "province": "Sindh",
+        "entity_name": "Port Qasim Bulk Fleet & Transport Co (SP-004)",
+        "sap_doc_no": "MIRO-5105609711 / MIRO-5105609749",
+        "po_no": "PO-4500119010",
+        "grn_no": "SES-10004650",
+        "posting_date": "2026-10-21",
+        "amount_pkr": 540000.0,
+        "masked_identifiers": {"vendor_ntn": "NTN-*****92-8", "vendor_iban": "PK61MCIB************3304"},
+        "rule_triggered": True,
+        "rule_flag_reason": "Duplicate Freight Bill: Invoice 'PQBF-1088' and 'PQBF-1088/DUP' both booked for PKR 540,000 covering identical Karachi-to-Hyderabad biscuit dispatch bilty batch B-901..B-915.",
+        "evidence_doc_id": "EVID-PTP-010",
+        "evidence_text": "OCR SCAN [Freight Bill PQBF-1088 dated 18-Oct-2026 attaching 15 Bilty receipts B-901 to B-915 = PKR 540,000]. Second voucher MIRO-5105609749 booked on 21-Oct-2026 attaching photocopies of the exact same 15 Bilty receipts B-901 to B-915.",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Non-Compliant / High Risk",
+        "regulatory_clauses": ["SECP-CA2017-S220", "FBR-STA1990-S22-23"]
+    },
+    {
+        "record_id": "TXN-PTP-011",
+        "control_id": "PTP-02",
+        "process_family": "Procure-to-Pay (P2P)",
+        "site_id": "PLANT-LHE-03",
+        "province": "Punjab",
+        "entity_name": "GT Road Freight & Distribution Movers (SP-014)",
+        "sap_doc_no": "PO-4500119101 / PO-4500119102 / PO-4500119103",
+        "po_no": "PO-4500119101..03",
+        "grn_no": "SES-10004680..82",
+        "posting_date": "2026-10-22",
+        "amount_pkr": 1380000.0,
+        "masked_identifiers": {"vendor_ntn": "NTN-*****20-3", "vendor_iban": "PK82UBLX************4014"},
+        "rule_triggered": True,
+        "rule_flag_reason": "3 Service POs created on same day 2026-10-22 by same buyer for PKR 460,000 each (Total = PKR 1,380,000) to avoid the PKR 500,000 approval limit.",
+        "evidence_doc_id": "EVID-PTP-011",
+        "evidence_text": "Single ad-hoc warehouse shifting contract quotation from SP-014 for PKR 1,380,000 split into three separate POs of PKR 460,000 created within 45 minutes.",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Non-Compliant / High Risk",
+        "regulatory_clauses": ["SECP-CA2017-S223", "FBR-ITO2001-S153-174"]
+    },
+    {
+        "record_id": "TXN-PTP-012",
+        "control_id": "PTP-03",
+        "process_family": "Procure-to-Pay (P2P)",
+        "site_id": "PLANT-KPK-02",
+        "province": "Khyber Pakhtunkhwa",
+        "entity_name": "Hattar Corrugated Cartons & Board (V-1005)",
+        "sap_doc_no": "MIRO-5105609802",
+        "po_no": "PO-4500119150",
+        "grn_no": "GRN-5000882510",
+        "posting_date": "2026-10-23",
+        "amount_pkr": 920000.0,
+        "masked_identifiers": {"vendor_ntn": "NTN-*****04-5", "vendor_iban": "PK52KHYB************6677"},
+        "rule_triggered": True,
+        "rule_flag_reason": "Unit price billed at PKR 92.00/PC for 10,000 Master Cartons vs. locked SAP ME13 contract price of PKR 85.00/PC (+8.24% variance = PKR 70,000 excess).",
+        "evidence_doc_id": "EVID-PTP-012",
+        "evidence_text": "No approved contract rate amendment exists in SAP ME13. Supplier billed PKR 92/carton instead of contracted PKR 85/carton and AP posted invoice without price variance approval.",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Needs Improvement / Medium Risk",
+        "regulatory_clauses": ["SECP-CA2017-S230"]
+    },
+    {
+        "record_id": "TXN-PAY-010",
+        "control_id": "PAY-01",
+        "process_family": "Payroll, HR & Labour-Law Compliance",
+        "site_id": "PLANT-KHI-01",
+        "province": "Sindh",
+        "entity_name": "Sindh Janitorial & Sanitation Associates (SP-005 — 28 Workers)",
+        "sap_doc_no": "IR-WAGE-KHI-2026-10-SP005",
+        "po_no": "PO-4500117005",
+        "grn_no": "SES-10004690",
+        "posting_date": "2026-10-24",
+        "amount_pkr": 952000.0,
+        "masked_identifiers": {"sample_worker_cnic": "42501-*******-2", "contractor_ntn": "NTN-*****82-4", "contractor_iban": "PK45BAHL************4405"},
+        "rule_triggered": True,
+        "rule_flag_reason": "28 janitorial workers at Port Qasim Factory (Sindh) paid PKR 34,000/month for full 26-day attendance, PKR 3,000/worker below the Sindh notified minimum wage of PKR 37,000/month.",
+        "evidence_doc_id": "EVID-PAY-010",
+        "evidence_text": "SP-005 Wage Disbursement Register (Oct 2026) shows still using outdated 2023/2024 wage rate of PKR 34,000/month instead of the notified PKR 37,000/month under Sindh Minimum Wages Act 2015.",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Non-Compliant / High Risk",
+        "regulatory_clauses": ["SINDH-MW-2015-NOTIF"]
+    },
+    {
+        "record_id": "TXN-PAY-011",
+        "control_id": "PAY-03",
+        "process_family": "Payroll, HR & Labour-Law Compliance",
+        "site_id": "PLANT-KHI-01",
+        "province": "Sindh",
+        "entity_name": "Mehran Industrial Security Services (SP-002 — 68 Security Guards)",
+        "sap_doc_no": "IR-AUDIT-KHI-2026-10-SESSI",
+        "po_no": "PO-4500117002",
+        "grn_no": "SES-10004701",
+        "posting_date": "2026-10-24",
+        "amount_pkr": 185000.0,
+        "masked_identifiers": {"contractor_ntn": "NTN-*****14-5", "sessi_reg_masked": "SESSI-KHI-*****19"},
+        "rule_triggered": True,
+        "rule_flag_reason": "22 of 68 security guards deployed at Port Qasim Factory by SP-002 have no SESSI registration card or October 2026 SESSI contribution deposit, and worked 12-hour shifts (72 hours/week) without double overtime pay.",
+        "evidence_doc_id": "EVID-PAY-011",
+        "evidence_text": "IR Checklist & ZKTeco Gate Guard Logs: 22 guards worked six 12-hour shifts (72 hrs/week, 24 hrs above the 48h Sindh Factories Act limit) paid as flat monthly allowance at <1.2x rate, and are omitted from SESSI monthly schedule.",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Non-Compliant / High Risk",
+        "regulatory_clauses": ["SINDH-FA2015-S51-66", "SINDH-SESSI-2016-S20", "EOBI-1976-S9-11"]
+    },
+    {
+        "record_id": "TXN-ITG-005",
+        "control_id": "ITG-01",
+        "process_family": "IT User Access & Segregation of Duties (SoD)",
+        "site_id": "HO-KHI-00",
+        "province": "Sindh",
+        "entity_name": "SAP User: USR-HR-PAY02 (Payroll Specialist — Head Office)",
+        "sap_doc_no": "SOD-SCAN-2026-10-USR-HR-PAY02",
+        "po_no": "N/A",
+        "grn_no": "SM20-LOG-88319",
+        "posting_date": "2026-10-25",
+        "amount_pkr": 0.0,
+        "masked_identifiers": {"user_cnic": "42201-*******-4", "sap_user_id": "USR-HR-PAY02"},
+        "rule_triggered": True,
+        "rule_flag_reason": "Critical HR/Payroll SoD Conflict: User USR-HR-PAY02 holds both Z_HR_MASTER_WRITE (`PA30/PA40` — ability to hire employees and change bank IBAN/basic pay in Infotype 0008/0009) AND Z_PY_PAYROLL_RUN (`PC00_M99_CALC` — ability to execute live payroll and generate bank transfer file).",
+        "evidence_doc_id": "EVID-ITG-005",
+        "evidence_text": "SAP AGR_USERS & SM20 Log: User modified bank account IBANs (Infotype 0009) for 3 employees via PA30 and subsequently ran live October payroll via PC00_M99_CALC without independent HR Manager release.",
+        "is_seeded_breach": True,
+        "ground_truth_rating": "Non-Compliant / High Risk",
+        "regulatory_clauses": ["SECP-CA2017-S223", "PECA-2016-S3-16", "IIA-GIAS-STD-12-2"]
+    },
+    {
+        "record_id": "TXN-PTP-013",
+        "control_id": "PTP-03",
+        "process_family": "Procure-to-Pay (P2P)",
+        "site_id": "PLANT-KHI-01",
+        "province": "Sindh",
+        "entity_name": "Sindh Fine Roller Flour Mills Ltd (V-1001)",
+        "sap_doc_no": "MIRO-5105609890",
+        "po_no": "PO-4500119210",
+        "grn_no": "GRN-5000882605",
+        "posting_date": "2026-10-25",
+        "amount_pkr": 2419000.0,
+        "masked_identifiers": {"vendor_ntn": "NTN-*****84-3", "vendor_iban": "PK36SCBL************9821"},
+        "rule_triggered": True,
+        "rule_flag_reason": "Unit rate PKR 120.95/KG on 20,000 KG Fine Flour exceeds baseline contract price PKR 118.00/KG by +2.5%.",
+        "evidence_doc_id": "EVID-PTP-013",
+        "evidence_text": "Signed Contract Addendum #ADD-2026-10-FLOUR approved by Head of Procurement & Finance Controller on 20-Oct-2026 authorizes temporary +2.5% Fortification Premix surcharge (PKR 2.95/KG) for Vitamin/Iron fortified biscuit batch.",
+        "is_seeded_breach": False,
+        "ground_truth_rating": "Compliant",
+        "regulatory_clauses": ["SECP-CA2017-S230"]
+    }
+]
+
+all_monitored_exceptions = seeded_exceptions_and_population + additional_items
+
+# Corrective Actions linked to confirmed/pending exceptions
+corrective_actions = [
+    {
+        "capa_id": "CAPA-2026-001",
+        "record_id": "TXN-PTP-001",
+        "control_id": "PTP-01",
+        "site_id": "PLANT-KHI-01",
+        "process_owner_role": "Head of Procurement / AP Manager",
+        "action_title": "Block Duplicate Payment MIRO-5105609148 (PKR 1,770,000) & Enable Fuzzy Invoice Reference Check in SAP OB08/OMRDC",
+        "due_date": "2026-11-05",
+        "status": "In Progress — Payment Blocked in SAP F110",
+        "auditor_verification": "Pending Verification by Internal Audit"
+    },
+    {
+        "capa_id": "CAPA-2026-002",
+        "record_id": "TXN-PTP-005",
+        "control_id": "PTP-02",
+        "site_id": "PLANT-KHI-01",
+        "process_owner_role": "Head of Procurement",
+        "action_title": "Enforce 72-Hour Cumulative Vendor PO Value Release Strategy in SAP S/4HANA for POs Exceeding PKR 500,000",
+        "due_date": "2026-11-10",
+        "status": "Open — Assigned to Process Owner",
+        "auditor_verification": "Pending Verification by Internal Audit"
+    },
+    {
+        "capa_id": "CAPA-2026-003",
+        "record_id": "TXN-PAY-001",
+        "control_id": "PAY-01",
+        "site_id": "PLANT-KHI-01",
+        "process_owner_role": "Head of Industrial Relations (IR)",
+        "action_title": "Withhold Contractor SP-001 Invoice & Mandate Arrears Disbursement of PKR 5,000/worker to 38 Packing Workers under Sindh Minimum Wage Notification (PKR 37,000)",
+        "due_date": "2026-11-03",
+        "status": "In Progress — Contractor Arrears Sheet Requested",
+        "auditor_verification": "Pending Verification by Internal Audit"
+    },
+    {
+        "capa_id": "CAPA-2026-004",
+        "record_id": "TXN-PAY-002",
+        "control_id": "PAY-01",
+        "site_id": "PLANT-KPK-02",
+        "process_owner_role": "Head of Industrial Relations (IR)",
+        "action_title": "Enforce PKR 36,000 Base Wage (Excluding Overtime) for 24 Wafer Helpers under SP-006 per KP Minimum Wages Act 2013",
+        "due_date": "2026-11-04",
+        "status": "Open — Assigned to Process Owner",
+        "auditor_verification": "Pending Verification by Internal Audit"
+    },
+    {
+        "capa_id": "CAPA-2026-005",
+        "record_id": "TXN-PAY-005",
+        "control_id": "PAY-02",
+        "site_id": "PLANT-KHI-01",
+        "process_owner_role": "Head of HR / Payroll Manager",
+        "action_title": "Recover PKR 94,500 Post-Separation Salary Paid to EMP-10184 & Automate Biometric-to-SAP PA0000 Payroll Lock",
+        "due_date": "2026-11-02",
+        "status": "Verified & Closed — Bank Reversal Completed",
+        "auditor_verification": "Verified by Senior Internal Auditor & Head of HR"
+    },
+    {
+        "capa_id": "CAPA-2026-006",
+        "record_id": "TXN-ITG-001",
+        "control_id": "ITG-01",
+        "site_id": "HO-KHI-00",
+        "process_owner_role": "Head of IT",
+        "action_title": "Revoke Role Z_FI_VENDOR_MASTER_MAINT (FK01/FK02) from USR-AP-FIN04 & Audit All 14 Vendor IBAN Edits in October 2026",
+        "due_date": "2026-11-01",
+        "status": "In Progress — Role Revoked in SAP USR02",
+        "auditor_verification": "Pending Verification by Internal Audit"
+    }
+]
+
+# ==============================================================================
+# BUILD THE 200-ITEM GOLD SET OF PREVIOUSLY CLOSED AUDIT ITEMS
+# (Required by Phase 1 Row 7 & 7a: "Rating agreement with a senior auditor on a
+#  gold set of 200 previously closed audit items (target 85% or more)" and
+#  "False-clear rate: controls or items the tool reports as operating effectively,
+#   or rates Compliant, where a seeded breach exists (target 2% or less)")
+# ==============================================================================
+gold_set_200 = []
+templates = [
+    # True breach templates (140 items out of 200)
+    ("PTP-01", "PLANT-KHI-01", "Sindh", True, "Non-Compliant / High Risk", "Duplicate supplier invoice posted with suffix '-A' against single GRN; double payment risk under FBR Sales Tax Act Sec 23/73."),
+    ("PTP-01", "PLANT-LHE-03", "Punjab", True, "Non-Compliant / High Risk", "Supplier tax invoice booked twice via MIRO and FB60 with stripped hyphen in reference number."),
+    ("PTP-02", "PLANT-KHI-01", "Sindh", True, "Non-Compliant / High Risk", "Single vendor quotation split into 3 POs of PKR 485,000 within 24 hours to bypass PKR 500,000 Plant Manager DoA limit."),
+    ("PTP-02", "PLANT-KPK-02", "Khyber Pakhtunkhwa", True, "Needs Improvement / Medium Risk", "Two POs raised within 48 hours to packaging supplier totaling PKR 790,000 without competitive bid waiver."),
+    ("PTP-03", "PLANT-LHE-03", "Punjab", True, "Non-Compliant / High Risk", "PO and MIRO invoice unit price for BOPP film exceeds SAP ME13 contract rate by 8.5% with no signed addendum."),
+    ("PTP-03", "PLANT-KHI-01", "Sindh", True, "Needs Improvement / Medium Risk", "Minor price variance of 2.8% on carton delivery booked without updated SAP Info Record."),
+    ("PAY-01", "PLANT-KHI-01", "Sindh", True, "Non-Compliant / High Risk", "Contractor packing workers paid PKR 33,000 base for 26 days, below Sindh Minimum Wage Notification of PKR 37,000/month."),
+    ("PAY-01", "PLANT-KPK-02", "Khyber Pakhtunkhwa", True, "Non-Compliant / High Risk", "Contractor helpers paid PKR 31,500 base + overtime to mask shortfall below KP Minimum Wage floor of PKR 36,000/month."),
+    ("PAY-01", "PLANT-LHE-03", "Punjab", True, "Non-Compliant / High Risk", "Unlawful PPE/uniform deduction reduced sanitation workers' net wage to PKR 34,000 below Punjab PKR 37,000 floor."),
+    ("PAY-02", "PLANT-KHI-01", "Sindh", True, "Non-Compliant / High Risk", "Separated employee with 0 biometric punches paid regular monthly salary after exit date due to unlocked SAP Infotype 0003."),
+    ("PAY-03", "PLANT-KPK-02", "Khyber Pakhtunkhwa", True, "Non-Compliant / High Risk", "Contractor omitted 35 active factory workers from monthly EOBI PR-02A and ESSI KP contribution schedules."),
+    ("PAY-03", "PLANT-LHE-03", "Punjab", True, "Needs Improvement / Medium Risk", "Factory shift overtime paid at 1.5x instead of statutory 2.0x ordinary rate under Factories Act 1934 Sec 47."),
+    ("ITG-01", "HO-KHI-00", "Sindh", True, "Non-Compliant / High Risk", "SAP user holds conflicting Vendor Master (FK01) and Payment Run (F110) roles and executed both in same month."),
+    ("ITG-02", "PLANT-KPK-02", "Khyber Pakhtunkhwa", True, "Non-Compliant / High Risk", "Terminated storekeeper SAP account remained unlocked 25 days post-exit and posted MIGO inventory write-off."),
+    # Clean / Compliant or Low Risk Look-Alike templates (60 items out of 200)
+    ("PTP-01", "PLANT-KHI-01", "Sindh", False, "Compliant", "Two identical PKR amounts to sugar vendor on same day supported by two separate trucks, weighbridge slips, and GRNs."),
+    ("PTP-02", "PLANT-LHE-03", "Punjab", False, "Observation / Low Risk", "Two POs to same ingredient vendor within 48h due to documented emergency export batch with written Head of Procurement approval."),
+    ("PTP-03", "PLANT-KHI-01", "Sindh", False, "Compliant", "Unit price +2.5% above base contract supported by signed Fortification Premix Addendum in SAP DMS."),
+    ("PAY-01", "PLANT-KHI-01", "Sindh", False, "Compliant", "Pro-rated salary of PKR 22,769 for mid-month joiner who worked 16 of 26 days at compliant PKR 37,000/month base rate."),
+    ("PAY-02", "PLANT-KPK-02", "Khyber Pakhtunkhwa", False, "Compliant", "Post-retirement payout booked under Wage Type 9F01 (Full & Final Gratuity Settlement) with signed HR/Finance sanction."),
+    ("ITG-01", "PLANT-LHE-03", "Punjab", False, "Compliant", "Locked SAP Firefighter ID checked out for 60 mins under approved change ticket with zero financial postings and IT Head sign-off.")
+]
+
+for idx in range(1, 201):
+    tpl = templates[(idx - 1) % len(templates)]
+    ctrl_id, site_id, prov, is_breach, senior_rating, desc = tpl
+    amount = round(random.uniform(45000, 3800000), -2)
+    gold_set_200.append({
+        "gold_item_id": f"GOLD-{idx:03d}",
+        "historical_audit_quarter": random.choice(["2025-Q3", "2025-Q4", "2026-Q1", "2026-Q2"]),
+        "control_id": ctrl_id,
+        "site_id": site_id,
+        "province": prov,
+        "amount_pkr": amount,
+        "is_seeded_breach": is_breach,
+        "case_summary": f"[Historical Item GOLD-{idx:03d} | {site_id} | PKR {amount:,.0f}] {desc}",
+        "senior_auditor_rating": senior_rating
+    })
+
+full_population_summary = {
+    "scan_Window": "October 2026 Full Population Continuous Run",
+    "total_transactions_scanned": {
+        "purchase_orders_ekko_ekpo": 3420,
+        "vendor_invoices_rbkp_rseg": 3890,
+        "direct_payroll_records_payr": 1800,
+        "contractor_worker_wage_lines": 1325,
+        "biometric_attendance_punches": 78400,
+        "sap_active_user_role_mappings": 640,
+        "total_records_verified": 89475
+    },
+    "transaction_coverage_pct": 100.0,
+    "baseline_manual_coverage_pct": 0.15,
+    "detection_latency_days": 1.0,
+    "baseline_manual_latency_days": 180.0
+}
+
+dataset_bundle = {
+    "population_summary": full_population_summary,
+    "service_providers": service_providers,
+    "vendors": vendors,
+    "monitored_exceptions": all_monitored_exceptions,
+    "corrective_actions": corrective_actions,
+    "gold_set_200_summary": {
+        "total_items": len(gold_set_200),
+        "true_breach_items": sum(1 for x in gold_set_200 if x["is_seeded_breach"]),
+        "clean_or_mitigated_items": sum(1 for x in gold_set_200 if not x["is_seeded_breach"])
+    }
+}
+
+with open("data/synthetic_ccm_dataset.json", "w", encoding="utf-8") as f:
+    json.dump(dataset_bundle, f, indent=2, ensure_ascii=False)
+
+with open("data/gold_set_200_audit_items.json", "w", encoding="utf-8") as f:
+    json.dump(gold_set_200, f, indent=2, ensure_ascii=False)
+
+print("Saved data/synthetic_ccm_dataset.json and data/gold_set_200_audit_items.json")
+print(f"Monitored Exception Candidates: {len(all_monitored_exceptions)} (True Breaches: {sum(1 for x in all_monitored_exceptions if x['is_seeded_breach'])}, Look-alike Clean/Low: {sum(1 for x in all_monitored_exceptions if not x['is_seeded_breach'])})")
+print(f"Gold Set Items: {len(gold_set_200)}")

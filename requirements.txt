@@ -1,0 +1,1 @@
+# Zero external PyPI dependencies required — uses Python 3.12 standard library for instant cold-starts on Vercel
